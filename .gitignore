@@ -1,0 +1,19 @@
+# Allow this file itself
+!.gitignore
+
+# Ignore everything by default
+*
+
+# But keep these specific files
+!Neonatal_Under5_Mortality1.Rmd
+!dataset_datascience.csv
+!EAC_COUNTRIES.shp
+!EAC_COUNTRIES.dbf
+!EAC_COUNTRIES.shx
+!EAC_COUNTRIES.prj
+!EAC_COUNTRIES.cpg
+
+# Ignore R temp files
+.RData
+.Rhistory
+.Rproj.user/
