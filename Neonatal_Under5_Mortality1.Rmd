@@ -1,0 +1,206 @@
+---
+title: "NEONATAL AND UNDER5 MORTALITY RATE"
+author: "Iyvonne Anne Ayoyi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("D:/Data Analysis Projects/CEMA DATA SCIENCE")
+```
+
+Loading Libraries
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(sf)
+library(viridis)
+```
+
+Load and Prepare Data
+```{r}
+# Load WHO child mortality dataset (assumes combined data file)
+data <- read_csv("dataset_datascience.csv")
+
+# View column names to verify structure
+colnames(data)
+```
+
+```{r}
+# Load shapefile for mapping, standardize names
+eac_shape <- st_read("EAC_COUNTRIES.shp") %>%
+  mutate(Country = case_when(
+    NAME == "Democratic Republic of the Congo" ~ "Congo DRC",
+    NAME == "United Republic of Tanzania" ~ "Tanzania",
+    TRUE ~ NAME
+  ))
+print(unique(eac_shape$Country))
+```
+
+
+
+```{r}
+# Define EAC countries
+eac_countries <- c("Burundi", "Kenya", "Rwanda", "South Sudan", 
+                   "Tanzania", "Uganda", "Congo DRC", "Somalia")
+
+# Standardize and filter for EAC countries only
+mortality_data <- data %>%
+  mutate(
+    Country = case_when(
+      `Geographic area` %in% c("Congo, Dem. Rep.", "Democratic Republic of the Congo") ~ "Congo DRC",
+      `Geographic area` %in% c("Tanzania, United Rep.", "United Republic of Tanzania") ~ "Tanzania",
+      TRUE ~ `Geographic area`
+    ),
+    Year = as.numeric(substr(`Series Year`, 1, 4))
+  ) %>%
+  filter(Country %in% eac_countries)
+mortality_data
+
+```
+
+```{r}
+unique(data$Indicator)
+```
+
+
+```{r}
+# Separate neonatal and under-5 mortality
+neonatal <- mortality_data %>%
+  filter(Indicator == "Neonatal mortality rate")
+
+under5 <- mortality_data %>%
+  filter(Indicator == "Under-five mortality rate")
+
+
+summary(neonatal)
+summary(under5)
+
+```
+
+
+
+
+Merge with Latest Data and Add Labels
+```{r}
+#Latest data
+get_latest <- function(df) {
+  df %>%
+    group_by(Country) %>%
+    filter(Year == max(Year, na.rm = TRUE)) %>%
+    ungroup() %>%
+    select(Country, `Observation Value`, Year)
+}
+
+neonatal_latest <- get_latest(neonatal) %>% rename(NeonatalRate = `Observation Value`)
+under5_latest <- get_latest(under5) %>% rename(Under5Rate = `Observation Value`)
+neonatal_latest
+under5_latest
+```
+
+
+```{r}
+# Merge with shapefile
+merge_shape <- function(shape, data, rate_col) {
+  df <- left_join(shape, data, by = "Country")
+  centroid_coords <- st_centroid(df) %>% st_coordinates() %>% as.data.frame()
+  df$lon <- centroid_coords$X
+  df$lat <- centroid_coords$Y
+  df$Label <- ifelse(is.na(df[[rate_col]]), paste0(df$Country, "\nNA"), df$Country)
+  return(df)
+}
+
+neonatal_map <- merge_shape(eac_shape, neonatal_latest, "NeonatalRate")
+under5_map <- merge_shape(eac_shape, under5_latest, "Under5Rate")
+```
+
+
+#Plotting Choropleth Maps
+
+```{r}
+plot_choropleth <- function(df, rate_col, title) {
+  ggplot(df) +
+    geom_sf(aes(fill = .data[[rate_col]]), color = "white") +
+    geom_text(aes(x = lon, y = lat, label = Label), size = 3, color = "black") +
+    scale_fill_viridis_c(
+      name = "Deaths/1,000",
+      option = "C",
+      na.value = "lightgrey",
+      direction = -1,  
+  breaks = pretty(range(df[[rate_col]], na.rm = TRUE), n = 5)
+    ) +
+    labs(title = title) +
+    theme_minimal()+
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+      legend.position = "right"
+    )
+}
+
+plot_choropleth(neonatal_map, "NeonatalRate", "Latest Neonatal Mortality in EAC")
+plot_choropleth(under5_map, "Under5Rate", "Latest Under-Five Mortality in EAC")
+```
+```
+
+
+
+### Analyzing Trend Over Time
+
+```{r}
+#Preparing Trend Data
+prepare_trend <- function(df, rate_col) {
+  df %>%
+    group_by(Year) %>%
+    mutate(AvgRate = mean(.data[[rate_col]], na.rm = TRUE)) %>%
+    ungroup()
+}
+# Call the function with the correct rate column for each dataset
+neonatal_trend <- prepare_trend(neonatal, "Observation Value")
+under5_trend   <- prepare_trend(under5, "Observation Value")
+
+neonatal_trend
+under5_trend
+
+```
+
+
+```{r}
+plot_trends <- function(df, rate_col, title) {
+  ggplot(df, aes(x = Year)) +
+    geom_line(aes(y = AvgRate), color = "#0072B2", linetype = "dashed", size = 1.2) +
+    geom_jitter(aes(y = .data[[rate_col]], color = Country), width = 0.3, size = 2, alpha = 0.6) +
+    scale_color_viridis_d(name = "Country") +
+    scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+    labs(title = title, y = "Deaths/1,000 live births", x = "Year") +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5)
+    )
+}
+plot_trends(neonatal_trend, "Observation Value", "Neonatal Mortality Trends in EAC")
+plot_trends(under5_trend, "Observation Value", "Under-Five Mortality Trends in EAC")
+
+```
+
+
+
+Finding Country with the Highest Mortality Rates in EAC
+```{r}
+#Highest Under 5
+cat("Country with Highest Under-5 Mortality:\n")
+under5_latest %>% 
+  arrange(desc(Under5Rate)) %>% 
+  select(Country, Under5Rate,Year)
+```
+
+
+```{r}
+#Highest Neonatal
+cat("\nCountry with Highest Neonatal Mortality:\n")
+neonatal_latest %>% 
+  arrange(desc(NeonatalRate)) %>% 
+  select(Country, NeonatalRate, Year)
+```
